@@ -1,3 +1,4 @@
+
 {
   "expo": {
     "name": "AwesomeProject",
@@ -25,6 +26,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#008080",
+          "defaultChannel": "countdowns"
+        }
+      ]
+    ]
   }
 }

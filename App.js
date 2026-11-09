@@ -1,8 +1,8 @@
-import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
-import { Entypo } from '@expo/vector-icons';
-import DateTimePicker from "@react-native-community/datetimepicker"
 
+import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useState } from "react";
+import { Entypo } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import {
   FlatList,
   Keyboard,
@@ -16,118 +16,191 @@ import {
   Button,
 } from "react-native";
 import uuid from "react-native-uuid";
-
-const PICKER_MODE = Platform.select({
-  ios: 'datetime',
-  android: 'date'
-});
-const PICKER_DISPLAY = Platform.select({
-  ios: 'inline',
-  android: 'default'
-});
-const PICKER_SHOW = Platform.select({
-  ios: true,
-  android: false
-});
-
+import * as Notifications from "expo-notifications";
 import Countdown from "./components/Countdown";
 
-// ----- setup the notifications to works on the device here
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+const PICKER_MODE = Platform.select({
+  ios: "datetime",
+  android: "date",
+});
+
+const PICKER_DISPLAY = Platform.select({
+  ios: "inline",
+  android: "default",
+});
+
+const PICKER_SHOW = Platform.select({
+  ios: true,
+  android: false,
+});
+
+const EMOJIS = ["⏳", "🎂", "🎉", "✈️", "🎓", "💍", "🏡", "🎄"];
 
 export default function App() {
-
   const [tasks, setTasks] = useState([]);
   const [inputValue, setInputValue] = useState("");
-  const [inputDate, setDate] = useState(new Date());
-
+  const [inputDate, setDate] = useState(new Date(Date.now() + 60000));
+  const [selectedEmoji, setSelectedEmoji] = useState("⏳");
   const [mode, setMode] = useState(PICKER_MODE);
   const [show, setShow] = useState(PICKER_SHOW);
 
+  useEffect(() => {
+    async function configureNotifications() {
+      if (Platform.OS === "android") {
+        await Notifications.setNotificationChannelAsync("countdowns", {
+          name: "Countdown reminders",
+          importance: Notifications.AndroidImportance.DEFAULT,
+          sound: "default",
+        });
+      }
+
+      const { status } = await Notifications.getPermissionsAsync();
+
+      if (status !== "granted") {
+        await Notifications.requestPermissionsAsync();
+      }
+    }
+
+    configureNotifications();
+  }, []);
+
   const addToList = async () => {
-    if (inputValue === "") {
-      Alert.alert("Oops", "Input is empty", [
-        {
-          text: "Ok",
-        },
-      ]);
+    if (inputValue.trim() === "") {
+      Alert.alert("Oops", "Input is empty");
       return;
     }
-    if (inputDate < new Date()) {
-      Alert.alert("Oops", "Date must be future", [
-        {
-          text: "Ok",
-        },
-      ]);
+
+    if (inputDate <= new Date()) {
+      Alert.alert("Oops", "Date must be future");
       return;
     }
 
     const newItem = {
-      id: uuid.v4(),
-      title: inputValue,
-      emoji: '⏳', // ----- change the countdown icon here
-      date: inputDate
+      id: String(uuid.v4()),
+      title: inputValue.trim(),
+      emoji: selectedEmoji,
+      date: inputDate,
     };
 
-    // ----- schedule the countdown notification here
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
 
-    setTasks([newItem, ...tasks]);
+      if (status === "granted") {
+        const notificationId =
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `${newItem.emoji} ${newItem.title}`,
+              body: "Настав час вашої події!",
+              data: { eventId: newItem.id },
+              sound: "default",
+            },
+            trigger: {
+              date: newItem.date,
+              ...(Platform.OS === "android"
+                ? { channelId: "countdowns" }
+                : {}),
+            },
+          });
+
+        newItem.notificationId = notificationId;
+      }
+    } catch (error) {
+      console.log(error);
+    }
+
+    setTasks((currentTasks) => [newItem, ...currentTasks]);
     setInputValue("");
+    setSelectedEmoji("⏳");
     Keyboard.dismiss();
   };
 
   const deleteFromList = async (id) => {
-    const item = tasks.find(i => i.id == id);
+    const item = tasks.find((task) => task.id === id);
 
     if (item) {
-      setTasks(tasks.filter((task) => task.id != id));
+      setTasks((currentTasks) =>
+        currentTasks.filter((task) => task.id !== id)
+      );
 
-      // ----- cancel the countdown notification here
+      if (item.notificationId) {
+        await Notifications.cancelScheduledNotificationAsync(
+          item.notificationId
+        );
+      }
     }
   };
 
   const onChange = (event, selectedDate) => {
-    if (Platform.OS === 'android') {
-
-      if (mode === 'date') {
-        setDate(selectedDate);
-        setMode('time');
-        return;
-      }
-      else {
+    if (!selectedDate) {
+      if (Platform.OS === "android") {
         setShow(false);
-        setMode('date');
+        setMode("date");
       }
+      return;
+    }
+
+    if (Platform.OS === "android" && mode === "date") {
+      setDate(selectedDate);
+      setMode("time");
+      return;
+    }
+
+    if (Platform.OS === "android") {
+      setShow(false);
+      setMode("date");
     }
 
     setDate(selectedDate);
   };
 
   return (
-
     <View style={styles.container}>
       <View style={styles.taskWrapper}>
-        <View>
-          <Text style={styles.sectionTitle}>Countdowns</Text>
-        </View>
+        <Text style={styles.sectionTitle}>Countdowns</Text>
+
         <TextInput
           value={inputValue}
           style={styles.input}
-          placeholder='Enter Countdown Title...'
+          placeholder="Enter Countdown Title..."
           testID="input"
-          onChangeText={(text) => setInputValue(text)}
+          onChangeText={setInputValue}
         />
-        <View
-          style={styles.timeBtnWithText}>
+
+        <Text style={styles.emojiLabel}>Choose emoji:</Text>
+
+        <View style={styles.emojiPicker}>
+          {EMOJIS.map((emoji) => (
+            <TouchableOpacity
+              key={emoji}
+              onPress={() => setSelectedEmoji(emoji)}
+              style={[
+                styles.emojiOption,
+                selectedEmoji === emoji && styles.selectedEmoji,
+              ]}
+            >
+              <Text style={styles.emojiText}>{emoji}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.timeBtnWithText}>
           <Button
             color="#085252"
             testID="showPickerButton"
-            onPress={() => {
-              setShow(!show);
-            }}
+            onPress={() => setShow(!show)}
             title={show ? "Hide time picker" : "Select time 🕒"}
           />
           <Text>{inputDate.toLocaleString()}</Text>
         </View>
+
         <View style={styles.datePicker}>
           {show && (
             <DateTimePicker
@@ -137,17 +210,18 @@ export default function App() {
               mode={mode}
               is24Hour
               display={PICKER_DISPLAY}
-            />)}
+            />
+          )}
         </View>
+
         <TouchableOpacity onPress={addToList} testID="addBtn">
           <View style={styles.startBtn}>
             <Text style={{ color: "white" }}>Start Countdown</Text>
-
             <Entypo
-              style={{ marginLeft: 5, color: "white" }}
-              name='hour-glass'
+              style={{ marginLeft: 5 }}
+              name="hour-glass"
               size={20}
-              color='black'
+              color="white"
             />
           </View>
         </TouchableOpacity>
@@ -157,13 +231,16 @@ export default function App() {
             keyExtractor={(item) => item.id}
             data={tasks}
             renderItem={({ item }) => (
-              <Countdown countdown={item} deleteFromList={deleteFromList} />
+              <Countdown
+                countdown={item}
+                deleteFromList={deleteFromList}
+              />
             )}
           />
         </View>
       </View>
 
-      <StatusBar style='auto' />
+      <StatusBar style="auto" />
     </View>
   );
 }
@@ -176,16 +253,14 @@ const styles = StyleSheet.create({
   startBtn: {
     flexDirection: "row",
     padding: 10,
-    borderRadius: 5,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 10,
     backgroundColor: "#008080",
-    color: "#ffffff",
   },
   taskWrapper: {
     flex: 1,
-    paddingTop: 80,
+    paddingTop: 60,
     paddingHorizontal: 20,
   },
   sectionTitle: {
@@ -201,9 +276,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     padding: 15,
     borderRadius: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
   datePicker: {
     marginBottom: 10,
@@ -211,9 +283,33 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   timeBtnWithText: {
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between'
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  emojiLabel: {
+    marginTop: 12,
+    marginBottom: 6,
+    fontWeight: "600",
+  },
+  emojiPicker: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  emojiOption: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  selectedEmoji: {
+    borderColor: "#008080",
+    backgroundColor: "#d7eeee",
+  },
+  emojiText: {
+    fontSize: 24,
   },
 });
