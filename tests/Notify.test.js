@@ -10,14 +10,23 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import App from "../App";
 import { getNextMinuteCurrentTime } from "../utils.js/time";
 
-jest.mock("expo-notifications", (act) => {
-  const actual = jest.requireActual("expo-notifications");
-  return {
-    ...actual,
-    getPermissionsAsync: jest.fn(() => Promise.resolve({ status: "granted" })),
-    scheduleNotificationAsync: jest.fn(() => Promise.resolve("notificationId")),
-  };
-});
+jest.mock("expo-notifications", () => ({
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(() =>
+    Promise.resolve({ status: "granted" })
+  ),
+  requestPermissionsAsync: jest.fn(() =>
+    Promise.resolve({ status: "granted" })
+  ),
+  setNotificationChannelAsync: jest.fn(() => Promise.resolve()),
+  scheduleNotificationAsync: jest.fn(() =>
+    Promise.resolve("notification-id")
+  ),
+  cancelScheduledNotificationAsync: jest.fn(() => Promise.resolve()),
+  AndroidImportance: {
+    DEFAULT: 3,
+  },
+}));
 
 const createDateTimeSetEvtParams = (date) => {
   return [
@@ -31,8 +40,15 @@ const createDateTimeSetEvtParams = (date) => {
   ];
 };
 
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
+  jest.clearAllMocks();
+});
+
 test("Notification sends correctly", async () => {
   jest.useFakeTimers();
+
   render(<App />);
 
   const titleInput = screen.getByTestId("input");
@@ -41,10 +57,12 @@ test("Notification sends correctly", async () => {
   expect(titleInput).toBeOnTheScreen();
   expect(timePicker).toBeDefined();
 
-  const user = userEvent.setup();
+  const user = userEvent.setup({
+    advanceTimers: jest.advanceTimersByTime,
+  });
+
   await user.type(titleInput, "Good Day!");
 
-  // Fire the onChange Event
   act(() => {
     fireEvent(
       timePicker,
@@ -54,13 +72,21 @@ test("Notification sends correctly", async () => {
   });
 
   const addBtn = screen.getByTestId("addBtn");
+
   expect(addBtn).toBeOnTheScreen();
 
   await user.press(addBtn);
-  act(jest.runAllTimers);
 
-  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalled();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(
+    Notifications.scheduleNotificationAsync
+  ).toHaveBeenCalled();
+
   const scheduleResult =
     Notifications.scheduleNotificationAsync.mock.results[0].value;
-  await expect(scheduleResult).resolves.toEqual("notificationId");
+
+  await expect(scheduleResult).resolves.toEqual("notification-id");
 });

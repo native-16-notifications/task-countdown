@@ -10,14 +10,23 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import App from "../App";
 import { getNextMinuteCurrentTime } from "../utils.js/time";
 
-jest.mock("expo-notifications", () => {
-  const actual = jest.requireActual("expo-notifications");
-  return {
-    ...actual,
-    getPermissionsAsync: jest.fn(() => Promise.resolve({ status: "granted" })),
-    cancelScheduledNotificationAsync: jest.fn(),
-  };
-});
+jest.mock("expo-notifications", () => ({
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(() =>
+    Promise.resolve({ status: "granted" })
+  ),
+  requestPermissionsAsync: jest.fn(() =>
+    Promise.resolve({ status: "granted" })
+  ),
+  setNotificationChannelAsync: jest.fn(() => Promise.resolve()),
+  scheduleNotificationAsync: jest.fn(() =>
+    Promise.resolve("notification-id")
+  ),
+  cancelScheduledNotificationAsync: jest.fn(() => Promise.resolve()),
+  AndroidImportance: {
+    DEFAULT: 3,
+  },
+}));
 
 const createDateTimeSetEvtParams = (date) => {
   return [
@@ -31,16 +40,27 @@ const createDateTimeSetEvtParams = (date) => {
   ];
 };
 
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
+  jest.clearAllMocks();
+});
+
 test("Notification removes correctly", async () => {
   jest.useFakeTimers();
+
   render(<App />);
 
   const titleInput = screen.getByTestId("input");
   const timePicker = screen.UNSAFE_getByType(DateTimePicker);
   const addBtn = screen.getByTestId("addBtn");
 
-  const user = userEvent.setup();
+  const user = userEvent.setup({
+    advanceTimers: jest.advanceTimersByTime,
+  });
+
   await user.type(titleInput, "Good Day!");
+
   act(() => {
     fireEvent(
       timePicker,
@@ -51,8 +71,15 @@ test("Notification removes correctly", async () => {
 
   await user.press(addBtn);
 
-  const removeBtn = screen.getByTestId("removeBtn");
+  const removeBtn = await screen.findByTestId("removeBtn");
+
   await user.press(removeBtn);
 
-  expect(Notifications.cancelScheduledNotificationAsync).toHaveBeenCalled();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(
+    Notifications.cancelScheduledNotificationAsync
+  ).toHaveBeenCalled();
 });
